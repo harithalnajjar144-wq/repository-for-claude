@@ -1,0 +1,93 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans-arabic/400.css";
+@import "@fontsource/ibm-plex-sans-arabic/500.css";
+@import "@fontsource/ibm-plex-sans-arabic/600.css";
+@import "@fontsource/ibm-plex-sans-arabic/700.css";
+
+@theme {
+  --font-sans: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+
+  --color-brand-50: #eef7f1;
+  --color-brand-100: #d5ecdd;
+  --color-brand-200: #acd8bc;
+  --color-brand-300: #7bbd95;
+  --color-brand-400: #4c9f6f;
+  --color-brand-500: #2f8455;
+  --color-brand-600: #216a43;
+  --color-brand-700: #1b5537;
+  --color-brand-800: #17442d;
+  --color-brand-900: #123824;
+
+  --color-earth-50: #faf5ee;
+  --color-earth-100: #f2e6d4;
+  --color-earth-200: #e4cba6;
+  --color-earth-300: #d3ab74;
+  --color-earth-400: #c38f4e;
+  --color-earth-500: #a9733a;
+  --color-earth-600: #8b5a2f;
+  --color-earth-700: #6f4628;
+
+  --color-sand: #f7f2e9;
+  --color-ink: #1d2b36;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  background: var(--color-sand);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle topographic texture, echoing the brand deck. */
+.topo-bg {
+  background-color: var(--color-sand);
+  background-image: radial-gradient(circle at 15% 20%, rgba(169, 115, 58, 0.08) 0, transparent 40%),
+    radial-gradient(circle at 85% 0%, rgba(47, 132, 85, 0.1) 0, transparent 35%);
+}
+
+@utility card {
+  @apply rounded-2xl border border-earth-100 bg-white shadow-[0_1px_2px_rgba(29,43,54,0.04),0_4px_16px_-8px_rgba(29,43,54,0.12)];
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+}
+@utility btn-primary {
+  @apply btn bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800;
+}
+@utility btn-earth {
+  @apply btn bg-earth-500 text-white hover:bg-earth-600;
+}
+@utility btn-outline {
+  @apply btn border border-earth-200 bg-white text-ink hover:border-brand-400 hover:text-brand-700;
+}
+@utility btn-ghost {
+  @apply btn text-ink/80 hover:bg-earth-50;
+}
+@utility btn-danger {
+  @apply btn bg-red-600 text-white hover:bg-red-700;
+}
+@utility input {
+  @apply w-full rounded-xl border border-earth-200 bg-white px-3.5 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink/40 focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:bg-earth-50;
+}
+@utility label {
+  @apply mb-1.5 block text-sm font-medium text-ink/80;
+}
+@utility badge {
+  @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+}
+@utility table-base {
+  @apply w-full text-sm;
+  & th {
+    @apply border-b border-earth-100 bg-earth-50/60 px-3 py-2.5 text-start font-semibold whitespace-nowrap text-ink/70;
+  }
+  & td {
+    @apply border-b border-earth-50 px-3 py-2.5 align-middle;
+  }
+}

@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: halali
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-halali}
+      POSTGRES_DB: halali
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on: [db]
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://halali:${DB_PASSWORD:-halali}@db:5432/halali
+      CRON_SECRET: ${CRON_SECRET:-change-me}
+      NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3000}
+      # Remove this line once the site is served over HTTPS:
+      INSECURE_COOKIES: "1"
+    volumes:
+      - uploads:/data/uploads
+    restart: unless-stopped
+
+  # Closes finished auctions every minute.
+  cron:
+    image: curlimages/curl:latest
+    depends_on: [app]
+    entrypoint: ["sh", "-c", "while true; do curl -fsS -H \"Authorization: Bearer $${CRON_SECRET}\" http://app:3000/api/cron/settle || true; sleep 60; done"]
+    environment:
+      CRON_SECRET: ${CRON_SECRET:-change-me}
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:
