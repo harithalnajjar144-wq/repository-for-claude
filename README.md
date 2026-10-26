@@ -52,7 +52,29 @@ For production, seed without demo data and with your own admin password:
 SEED_DEMO=0 SEED_ADMIN_PHONE=07XXXXXXXXX SEED_ADMIN_PASSWORD='strong-password' npm run db:seed
 ```
 
-## Deploy with Docker
+## Deploy on Railway (quickest)
+
+The app sets itself up on start (`src/instrumentation.ts`): it applies migrations, creates the subscription plans and admin account, optionally loads demo data, and closes finished auctions every minute. No build commands, cron jobs or shell access are needed.
+
+1. In Railway, create a project from the GitHub repo.
+2. Add a **PostgreSQL** database to the project.
+3. On the app service, add a **volume** mounted at `/data` (stores uploaded photos).
+4. Set these variables on the app service:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (reference to the database) |
+| `UPLOAD_DIR` | `/data/uploads` |
+| `ADMIN_PHONE` | the phone number you'll sign in with as admin |
+| `ADMIN_PASSWORD` | at least 10 characters |
+| `SEED_DEMO` | `1` to load sample listings for a demo (remove later) |
+| `CRON_SECRET` | any long random string |
+
+5. Under the service's networking settings, generate a public domain. HTTPS is included.
+
+The admin account is created only if that phone number doesn't exist yet, so changing `ADMIN_PASSWORD` later does not change the password.
+
+## Deploy with Docker (own server)
 
 ```bash
 DB_PASSWORD=... CRON_SECRET=... SITE_URL=https://halali.iq docker compose up -d --build
