@@ -74,6 +74,18 @@ The app sets itself up on start (`src/instrumentation.ts`): it applies migration
 
 The admin account is created only if that phone number doesn't exist yet, so changing `ADMIN_PASSWORD` later does not change the password.
 
+### Optional settings
+
+| Variable | Purpose |
+| --- | --- |
+| `SMS_PROVIDER` | Turns on SMS confirmation of phone numbers at sign-up and password reset: `twilio`, `webhook` (any Iraqi gateway), or `log` (codes printed to the log, for testing). Unset = no SMS step. |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | For `SMS_PROVIDER=twilio`. |
+| `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_TOKEN` | For `SMS_PROVIDER=webhook`: receives `{ to, phone, message }`. |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | Store photos in Cloudflare R2 / S3 instead of the volume. Image URLs stay the same. |
+| `S3_PUBLIC_URL` | Optional public bucket/CDN domain; public images then redirect there. |
+| `EXPO_ACCESS_TOKEN` | Optional, if push security is enabled in your Expo account. |
+| `MIN_APP_VERSION` | Oldest mobile app version allowed (the app asks older versions to update). |
+
 ## Deploy with Docker (own server)
 
 ```bash
@@ -84,6 +96,10 @@ docker compose exec app sh -c "SEED_DEMO=0 SEED_ADMIN_PASSWORD='...' npm run db:
 This starts PostgreSQL, the app (migrations run on start) and a small job that settles finished auctions every minute. Put a reverse proxy with HTTPS (e.g. Caddy or Nginx) in front, then remove `INSECURE_COOKIES` from `docker-compose.yml`. Back up the `pgdata` and `uploads` volumes.
 
 Auctions also settle automatically whenever someone opens them, so the cron job is a safety net rather than a requirement.
+
+## Mobile API
+
+The Android/iOS app talks to `/api/v1`. See [docs/mobile-api.md](docs/mobile-api.md). Business logic lives in `src/lib/services` and is shared by the website's server actions and the API.
 
 ## Tests
 

@@ -1,61 +1,26 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
-import { db } from "@/db";
-import { providers, users } from "@/db/schema";
-import { createSession, destroySession, hashPassword, verifyPassword } from "@/lib/auth";
-import { normalizePhone } from "@/lib/format";
-import { GOVERNORATES } from "@/lib/constants";
+import { createSession, destroySession } from "@/lib/auth";
 import { toActionError, UserError, type ActionState } from "@/lib/errors";
+import { otpRequired, requestOtp, verifyOtp } from "@/lib/otp";
+import { authenticate, registerUser, resetPassword } from "@/lib/services/account";
+import { formObject } from "@/lib/validation";
 
 const safeNext = (n: FormDataEntryValue | null) => {
   const s = typeof n === "string" ? n : "";
   return s.startsWith("/") && !s.startsWith("//") ? s : "/dashboard";
 };
 
-const registerSchema = z.object({
-  name: z.string().trim().min(3, "الاسم قصير جداً").max(120),
-  phone: z.string().trim(),
-  password: z.string().min(8, "كلمة المرور يجب أن تكون 8 أحرف على الأقل").max(100),
-  city: z.enum(GOVERNORATES.map((g) => g.key) as [string, ...string[]], { message: "اختر المحافظة" }),
-  role: z.enum(["user", "trader", "vet", "shop"]),
-  businessName: z.string().trim().max(160).optional(),
-});
-
 export async function registerAction(_: ActionState, fd: FormData): Promise<ActionState> {
   try {
-    const parsed = registerSchema.safeParse(Object.fromEntries(fd));
-    if (!parsed.success) throw new UserError(parsed.error.issues[0].message);
-    const d = parsed.data;
-    const phone = normalizePhone(d.phone);
-    if (!phone) throw new UserError("رقم الهاتف غير صحيح. مثال: 07701234567");
-    if ((d.role === "vet" || d.role === "shop") && !d.businessName)
-      throw new UserError(d.role === "vet" ? "أدخل اسم العيادة أو الطبيب." : "أدخل اسم المحل.");
-    const exists = await db.select({ id: users.id }).from(users).where(eq(users.phone, phone));
-    if (exists.length) throw new UserError("هذا الرقم مسجل مسبقاً. سجّل الدخول بدلاً من ذلك.");
-    const [u] = await db
-      .insert(users)
-      .values({
-        name: d.name,
-        phone,
-        whatsapp: phone,
-        passwordHash: await hashPassword(d.password),
-        city: d.city,
-        role: d.role,
-      })
-      .returning({ id: users.id });
-    if (d.role === "vet" || d.role === "shop") {
-      await db.insert(providers).values({
-        userId: u.id,
-        kind: d.role,
-        businessName: d.businessName!,
-        city: d.city,
-        phone,
-        whatsapp: phone,
-      });
+    const input: Record<string, unknown> = formObject(fd);
+    if (otpRequired()) {
+      const code = String(fd.get("otpCode") ?? "");
+      if (!code) throw new UserError("أدخل رمز التحقق الذي وصلك برسالة.");
+      input.otpToken = (await verifyOtp(String(fd.get("phone") ?? ""), "register", code)).otpToken;
     }
+    const u = await registerUser(input);
     await createSession(u.id);
   } catch (e) {
     return toActionError(e);
@@ -65,13 +30,7 @@ export async function registerAction(_: ActionState, fd: FormData): Promise<Acti
 
 export async function loginAction(_: ActionState, fd: FormData): Promise<ActionState> {
   try {
-    const phone = normalizePhone(String(fd.get("phone") ?? ""));
-    const password = String(fd.get("password") ?? "");
-    if (!phone || !password) throw new UserError("أدخل رقم الهاتف وكلمة المرور.");
-    const [u] = await db.select().from(users).where(eq(users.phone, phone));
-    if (!u || !(await verifyPassword(password, u.passwordHash)))
-      throw new UserError("رقم الهاتف أو كلمة المرور غير صحيحة.");
-    if (u.isBanned) throw new UserError("تم إيقاف هذا الحساب. تواصل مع الدعم.");
+    const u = await authenticate(String(fd.get("phone") ?? ""), String(fd.get("password") ?? ""));
     await createSession(u.id);
   } catch (e) {
     return toActionError(e);
@@ -82,4 +41,26 @@ export async function loginAction(_: ActionState, fd: FormData): Promise<ActionS
 export async function logoutAction() {
   await destroySession();
   redirect("/");
+}
+
+/** Send an SMS code (sign-up or password reset). */
+export async function sendOtpAction(phone: string, purpose: "register" | "reset"): Promise<ActionState> {
+  try {
+    await requestOtp(phone, purpose === "reset" ? "reset" : "register");
+    return { ok: true, message: "تم إرسال رمز التحقق برسالة نصية." };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+export async function resetPasswordAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const phone = String(fd.get("phone") ?? "");
+    const { otpToken } = await verifyOtp(phone, "reset", String(fd.get("otpCode") ?? ""));
+    const u = await resetPassword(phone, otpToken, String(fd.get("password") ?? ""));
+    await createSession(u.id);
+  } catch (e) {
+    return toActionError(e);
+  }
+  redirect("/dashboard");
 }

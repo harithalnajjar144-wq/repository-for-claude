@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { otpRequired } from "@/lib/otp";
 import { loginAction } from "@/app/actions/auth";
 import { ActionForm, Field, SubmitButton } from "@/components/forms";
 
@@ -23,6 +24,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <input name="password" type="password" className="input" required autoComplete="current-password" />
           </Field>
           <SubmitButton className="btn-primary w-full" pendingText="جارٍ الدخول…">دخول</SubmitButton>
+          {otpRequired() && (
+            <Link href="/forgot-password" className="block text-center text-sm text-ink/60 hover:text-brand-700">نسيت كلمة المرور؟</Link>
+          )}
         </ActionForm>
         <p className="mt-6 text-center text-sm text-ink/60">
           ليس لديك حساب؟{" "}

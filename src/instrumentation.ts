@@ -3,7 +3,7 @@
  *  1. applies database migrations,
  *  2. creates subscription plans and the admin account (from ADMIN_PHONE / ADMIN_PASSWORD),
  *  3. loads demo data if SEED_DEMO=1,
- *  4. closes finished auctions every minute.
+ *  4. closes finished auctions and sends queued push notifications every minute.
  * This lets hosts like Railway run the app with no extra commands or cron jobs.
  */
 export async function register() {
@@ -13,6 +13,7 @@ export async function register() {
 
   const { runMigrations, ensureBaseData, seedDemoData } = await import("./lib/bootstrap");
   const { settleDueAuctions } = await import("./lib/auctions");
+  const { deliverPendingPushes } = await import("./lib/push");
 
   await runMigrations();
   const phone = process.env.ADMIN_PHONE;
@@ -25,7 +26,11 @@ export async function register() {
   }
   if (process.env.SEED_DEMO === "1") await seedDemoData();
 
-  const tick = () => settleDueAuctions().catch((e) => console.error("[halali] auction settlement failed", e));
+  const tick = () =>
+    settleDueAuctions()
+      .catch((e) => console.error("[halali] auction settlement failed", e))
+      .then(() => deliverPendingPushes())
+      .catch((e) => console.error("[halali] push delivery failed", e));
   setInterval(tick, 60_000).unref();
   tick();
   console.log("[halali] ready");

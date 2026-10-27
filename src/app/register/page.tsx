@@ -5,6 +5,8 @@ import { registerAction } from "@/app/actions/auth";
 import { GOVERNORATES } from "@/lib/constants";
 import { ActionForm, Field, SubmitButton } from "@/components/forms";
 import { RoleFields } from "./RoleFields";
+import { PhoneWithOtp } from "@/components/OtpField";
+import { otpRequired } from "@/lib/otp";
 
 export const metadata = { title: "إنشاء حساب" };
 
@@ -22,10 +24,13 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
           <Field label="الاسم الكامل">
             <input name="name" className="input" required minLength={3} maxLength={120} autoComplete="name" />
           </Field>
+          {otpRequired() && <PhoneWithOtp purpose="register" />}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="رقم الهاتف">
-              <input name="phone" type="tel" dir="ltr" className="input text-end" placeholder="07XX XXX XXXX" required autoComplete="tel" />
-            </Field>
+            {!otpRequired() && (
+              <Field label="رقم الهاتف">
+                <input name="phone" type="tel" dir="ltr" className="input text-end" placeholder="07XX XXX XXXX" required autoComplete="tel" />
+              </Field>
+            )}
             <Field label="المحافظة">
               <select name="city" className="input" required defaultValue="">
                 <option value="" disabled>اختر</option>

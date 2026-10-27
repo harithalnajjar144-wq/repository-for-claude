@@ -83,19 +83,65 @@ export const users = pgTable(
     // Spendable wallet balance. Held auction deposits are NOT included.
     walletBalance: money("wallet_balance").notNull().default(0),
     isBanned: boolean("is_banned").notNull().default(false),
+    /** Set once the phone number was confirmed with an SMS code. */
+    phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("users_phone_idx").on(t.phone)],
 );
 
-export const sessions = pgTable("sessions", {
-  id: varchar("id", { length: 64 }).primaryKey(), // sha256 of the cookie token
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const sessionClientEnum = pgEnum("session_client", ["web", "mobile"]);
+
+/** Login sessions. Web uses a cookie, the mobile app a Bearer token; both store only the SHA-256 hash. */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(), // sha256 of the token
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    client: sessionClientEnum("client").notNull().default("web"),
+    deviceName: varchar("device_name", { length: 120 }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("sessions_user_idx").on(t.userId)],
+);
+
+/** Expo push tokens of a user's devices. */
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: varchar("token", { length: 200 }).notNull(),
+    platform: varchar("platform", { length: 10 }).notNull().default("android"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("push_tokens_token_idx").on(t.token), index("push_tokens_user_idx").on(t.userId)],
+);
+
+/** One-time SMS codes for confirming phone numbers and resetting passwords. */
+export const phoneOtps = pgTable(
+  "phone_otps",
+  {
+    id: serial("id").primaryKey(),
+    phone: varchar("phone", { length: 20 }).notNull(),
+    purpose: varchar("purpose", { length: 20 }).notNull(), // register | reset
+    codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** Set after the code was entered correctly; the matching verification token is valid until it is used. */
+    verifiedTokenHash: varchar("verified_token_hash", { length: 64 }),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("phone_otps_phone_idx").on(t.phone, t.createdAt)],
+);
 
 export const verificationRequests = pgTable("verification_requests", {
   id: serial("id").primaryKey(),
@@ -441,9 +487,11 @@ export const notifications = pgTable(
     body: text("body"),
     link: text("link"),
     isRead: boolean("is_read").notNull().default(false),
+    /** Push queue: null until the notification was sent to the user's devices. */
+    pushedAt: timestamp("pushed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("notif_user_idx").on(t.userId, t.isRead)],
+  (t) => [index("notif_user_idx").on(t.userId, t.isRead), index("notif_push_queue_idx").on(t.pushedAt)],
 );
 
 export const settings = pgTable("settings", {
