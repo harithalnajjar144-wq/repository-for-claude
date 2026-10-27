@@ -1,5 +1,5 @@
-import { and, count, desc, eq, gt, inArray } from "drizzle-orm";
-import { db } from "@/db";
+import { and, count, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { db, type Tx } from "@/db";
 import { auctions, listings, plans, subscriptions, users } from "@/db/schema";
 import { UserError } from "./errors";
 import { getSettings } from "./settings";
@@ -16,12 +16,12 @@ export async function getActiveSubscription(userId: number) {
   return rows[0] ?? null;
 }
 
-export async function assertCanCreateListing(userId: number) {
+export async function assertCanCreateListing(userId: number, tx: Tx | typeof db = db) {
   const s = await getSettings();
   const sub = await getActiveSubscription(userId);
   const limit = sub ? sub.plan.maxActiveListings : s.freeActiveListings;
   if (limit === null) return;
-  const [{ n }] = await db
+  const [{ n }] = await tx
     .select({ n: count() })
     .from(listings)
     .where(and(eq(listings.userId, userId), eq(listings.status, "active")));
@@ -33,9 +33,9 @@ export async function assertCanCreateListing(userId: number) {
     );
 }
 
-export async function assertCanCreateAuction(userId: number) {
+export async function assertCanCreateAuction(userId: number, tx: Tx | typeof db = db) {
   const s = await getSettings();
-  const [u] = await db.select().from(users).where(eq(users.id, userId));
+  const [u] = await tx.select().from(users).where(eq(users.id, userId));
   if (s.requireVerificationForAuctions && u.verificationStatus !== "verified")
     throw new UserError("يجب توثيق حسابك قبل فتح مزاد.");
   if (u.walletBalance < 0)
@@ -43,7 +43,7 @@ export async function assertCanCreateAuction(userId: number) {
   const sub = await getActiveSubscription(userId);
   const limit = sub ? sub.plan.maxActiveAuctions : s.freeActiveAuctions;
   if (limit === null) return;
-  const [{ n }] = await db
+  const [{ n }] = await tx
     .select({ n: count() })
     .from(auctions)
     .where(and(eq(auctions.sellerId, userId), inArray(auctions.status, ["scheduled", "live"])));
@@ -58,6 +58,8 @@ export async function assertCanCreateAuction(userId: number) {
 /** Buy or extend a monthly plan, paid from the wallet. */
 export async function subscribe(userId: number, planId: number, months = 1) {
   return db.transaction(async (tx) => {
+    // Serialise subscription purchases per user (no double charge for one extension).
+    await tx.execute(sql`select id from users where id = ${userId} for update`);
     const [plan] = await tx.select().from(plans).where(eq(plans.id, planId));
     if (!plan || !plan.isActive) throw new UserError("الباقة غير متاحة.");
     const [u] = await tx.select().from(users).where(eq(users.id, userId));

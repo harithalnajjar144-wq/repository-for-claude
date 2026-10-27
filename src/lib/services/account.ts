@@ -1,16 +1,18 @@
-import { and, count, desc, eq, inArray, sum } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, ne, sum } from "drizzle-orm";
 import { db } from "@/db";
 import {
   auctionDeposits,
   notifications,
   providers,
+  securityEvents,
+  sessions,
   topupRequests,
   users,
   verificationRequests,
   walletTransactions,
   type User,
 } from "@/db/schema";
-import { hashPassword, verifyPassword, type SessionUser } from "../auth";
+import { hashPassword, hashToken, verifyPassword, type SessionUser } from "../auth";
 import { UserError } from "../errors";
 import { iqd, normalizePhone } from "../format";
 import { consumeOtpToken, otpRequired } from "../otp";
@@ -39,30 +41,55 @@ export async function registerUser(input: unknown) {
     if (!(await consumeOtpToken(phone, "register", d.otpToken))) throw new UserError("أكّد رقم هاتفك برمز التحقق أولاً.");
     phoneVerifiedAt = new Date();
   }
-  return db.transaction(async (tx) => {
-    const [u] = await tx
-      .insert(users)
-      .values({
-        name: d.name,
-        phone,
-        whatsapp: phone,
-        passwordHash: await hashPassword(d.password),
-        city: d.city,
-        role: d.role,
-        phoneVerifiedAt,
-      })
-      .returning();
-    if (d.role === "vet" || d.role === "shop")
-      await tx.insert(providers).values({ userId: u.id, kind: d.role, businessName: d.businessName!, city: d.city, phone, whatsapp: phone });
-    return u;
-  });
+  const validPhone: string = phone;
+  const insertUser = () =>
+    db.transaction(async (tx) => {
+      const [u] = await tx
+        .insert(users)
+        .values({
+          name: d.name,
+          phone: validPhone,
+          whatsapp: validPhone,
+          passwordHash: await hashPassword(d.password),
+          city: d.city,
+          role: d.role,
+          phoneVerifiedAt,
+        })
+        .returning();
+      if (d.role === "vet" || d.role === "shop")
+        await tx
+          .insert(providers)
+          .values({ userId: u.id, kind: d.role, businessName: d.businessName!, city: d.city, phone: validPhone, whatsapp: validPhone });
+      return u;
+    });
+  try {
+    return await insertUser();
+  } catch (e) {
+    // Two sign-ups with the same number at the same moment: the unique index decides.
+    const code = (e as { code?: string; cause?: { code?: string } })?.cause?.code ?? (e as { code?: string })?.code;
+    if (code === "23505") throw new UserError("هذا الرقم مسجل مسبقاً. سجّل الدخول بدلاً من ذلك.");
+    throw e;
+  }
 }
 
+const LOGIN_FAILS_MAX = 10;
+const LOGIN_FAILS_WINDOW_MS = 15 * 60_000;
+
+/** Phone + password check, with a per-account lockout after repeated failures (web and app). */
 export async function authenticate(rawPhone: string, password: string) {
   const phone = normalizePhone(rawPhone ?? "");
   if (!phone || !password) throw new UserError("أدخل رقم الهاتف وكلمة المرور.");
+  const key = `login_fail:${phone}`;
+  const [{ n }] = await db
+    .select({ n: count() })
+    .from(securityEvents)
+    .where(and(eq(securityEvents.key, key), gt(securityEvents.createdAt, new Date(Date.now() - LOGIN_FAILS_WINDOW_MS))));
+  if (n >= LOGIN_FAILS_MAX) throw new UserError("محاولات دخول كثيرة. انتظر 15 دقيقة ثم حاول مرة أخرى، أو استعد كلمة المرور.");
   const [u] = await db.select().from(users).where(eq(users.phone, phone));
-  if (!u || !(await verifyPassword(password, u.passwordHash))) throw new UserError("رقم الهاتف أو كلمة المرور غير صحيحة.");
+  if (!u || !(await verifyPassword(password, u.passwordHash))) {
+    await db.insert(securityEvents).values({ key });
+    throw new UserError("رقم الهاتف أو كلمة المرور غير صحيحة.");
+  }
   if (u.isBanned) throw new UserError("تم إيقاف هذا الحساب. تواصل مع الدعم.");
   return u;
 }
@@ -78,6 +105,9 @@ export async function resetPassword(rawPhone: string, otpToken: string, newPassw
     .where(eq(users.phone, phone))
     .returning();
   if (!u) throw new UserError("لا يوجد حساب بهذا الرقم.");
+  // Sign out every device (the caller issues a fresh session) and clear the lockout.
+  await db.delete(sessions).where(eq(sessions.userId, u.id));
+  await db.delete(securityEvents).where(eq(securityEvents.key, `login_fail:${phone}`));
   return u;
 }
 
@@ -98,11 +128,15 @@ export async function updateProfile(user: SessionUser, input: unknown) {
   return { user: publicUser(u), nameLocked: nameLocked && d.name !== user.name };
 }
 
-export async function changePassword(user: SessionUser, current: string, next: string) {
+/** Changes the password and signs out every other device. `currentToken` is the session to keep. */
+export async function changePassword(user: SessionUser, current: string, next: string, currentToken?: string | null) {
   if ((next ?? "").length < 8) throw new UserError("كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل.");
   const [u] = await db.select().from(users).where(eq(users.id, user.id));
   if (!(await verifyPassword(current ?? "", u.passwordHash))) throw new UserError("كلمة المرور الحالية غير صحيحة.");
   await db.update(users).set({ passwordHash: await hashPassword(next) }).where(eq(users.id, user.id));
+  await db
+    .delete(sessions)
+    .where(and(eq(sessions.userId, user.id), currentToken ? ne(sessions.id, hashToken(currentToken)) : undefined));
 }
 
 /** Image fields are URLs from POST /api/v1/uploads?private=1 (API) or already-saved files (web). */
@@ -110,9 +144,9 @@ export async function requestVerification(user: SessionUser, input: unknown) {
   if (user.verificationStatus === "verified") throw new UserError("حسابك موثق مسبقاً.");
   if (user.verificationStatus === "pending") throw new UserError("طلبك قيد المراجعة.");
   const d = parse(verificationInput, input);
-  const documentImages = await assertUploadedImages(d.documentImages, { private: true, max: 2 });
+  const documentImages = await assertUploadedImages(d.documentImages, { private: true, max: 2, userId: user.id });
   if (!documentImages.length) throw new UserError("ارفع صورة المستمسك (الوجه الأمامي على الأقل).");
-  const [licenseImage] = d.licenseImage ? await assertUploadedImages([d.licenseImage], { private: true, max: 1 }) : [null];
+  const [licenseImage] = d.licenseImage ? await assertUploadedImages([d.licenseImage], { private: true, max: 1, userId: user.id }) : [null];
   if ((user.role === "vet" || user.role === "shop") && !licenseImage)
     throw new UserError(user.role === "vet" ? "ارفع صورة إجازة ممارسة المهنة البيطرية." : "ارفع صورة إجازة المحل أو الهوية التجارية.");
   await db.transaction(async (tx) => {
@@ -142,7 +176,7 @@ export async function latestVerificationRequest(userId: number) {
 
 export async function requestTopup(user: SessionUser, input: unknown) {
   const d = parse(topupInput, input);
-  const [receiptImage] = d.receiptImage ? await assertUploadedImages([d.receiptImage], { private: true, max: 1 }) : [null];
+  const [receiptImage] = d.receiptImage ? await assertUploadedImages([d.receiptImage], { private: true, max: 1, userId: user.id }) : [null];
   if (d.method !== "cash" && !d.transferRef && !receiptImage) throw new UserError("أدخل رقم الحوالة أو ارفع صورة الإيصال.");
   const [t] = await db
     .insert(topupRequests)

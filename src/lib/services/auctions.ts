@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { auctionDeposits, auctions, users } from "@/db/schema";
 import type { SessionUser } from "../auth";
@@ -37,31 +37,36 @@ export async function createAuction(user: SessionUser, input: unknown, images: s
   if (!images.length) throw new UserError("أضف صورة واحدة على الأقل.");
   if (images.length > 8) throw new UserError("الحد الأقصى 8 صور.");
 
-  const [row] = await db
-    .insert(auctions)
-    .values({
-      sellerId: user.id,
-      title: d.title,
-      description: d.description,
-      category: d.category,
-      breed: d.breed || null,
-      ageMonths: d.ageMonths ?? null,
-      gender: d.gender,
-      weightKg: d.weightKg ?? null,
-      quantity: d.quantity,
-      city: d.city,
-      images,
-      startPrice: d.startPrice,
-      minIncrement,
-      reservePrice: d.reservePrice || null,
-      depositAmount: deposit,
-      commissionRate: String(s.auctionCommissionRate),
-      startsAt,
-      endsAt,
-      status: d.startMode === "now" ? "live" : "scheduled",
-    })
-    .returning();
-  return row;
+  return db.transaction(async (tx) => {
+    // One create at a time per user, so parallel requests cannot pass the plan limit together.
+    await tx.execute(sql`select id from users where id = ${user.id} for update`);
+    await assertCanCreateAuction(user.id, tx);
+    const [row] = await tx
+      .insert(auctions)
+      .values({
+        sellerId: user.id,
+        title: d.title,
+        description: d.description,
+        category: d.category,
+        breed: d.breed || null,
+        ageMonths: d.ageMonths ?? null,
+        gender: d.gender,
+        weightKg: d.weightKg ?? null,
+        quantity: d.quantity,
+        city: d.city,
+        images,
+        startPrice: d.startPrice,
+        minIncrement,
+        reservePrice: d.reservePrice || null,
+        depositAmount: deposit,
+        commissionRate: String(s.auctionCommissionRate),
+        startsAt,
+        endsAt,
+        status: d.startMode === "now" ? "live" : "scheduled",
+      })
+      .returning();
+    return row;
+  });
 }
 
 /** Full auction page data: details, live state, seller, and (for seller/winner) the other party's contact. */

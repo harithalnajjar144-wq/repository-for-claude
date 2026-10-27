@@ -56,7 +56,11 @@ export default function ListingScreen() {
       <Stack.Screen options={{ title: category(l.category) }} />
       <Gallery images={l.images} category={l.category} />
       <View style={{ padding: 16, gap: 14 }}>
-        {l.status !== "active" && <Notice>{l.status === "sold" ? "تم بيع هذا الإعلان." : "هذا الإعلان غير ظاهر للعامة."}</Notice>}
+        {l.moderatedAt && l.status !== "active" ? (
+          <Notice tone="red">أوقفت الإدارة هذا الإعلان لمخالفته شروط النشر. تواصل مع الدعم للاستفسار.</Notice>
+        ) : l.status !== "active" ? (
+          <Notice>{l.status === "sold" ? "تم بيع هذا الإعلان." : "هذا الإعلان غير ظاهر للعامة."}</Notice>
+        ) : null}
         <Card style={{ gap: 8 }}>
           <Row wrap gap={6}>
             {l.type === "wanted" ? <Badge label="طلب شراء" tone="blue" /> : <Badge label="للبيع" tone="green" />}
@@ -100,7 +104,7 @@ export default function ListingScreen() {
           <Card style={{ gap: 8 }}>
             <T w="semibold">إدارة الإعلان</T>
             <Button title="✏️ تعديل" variant="outline" onPress={() => router.push({ pathname: "/listing/edit/[id]", params: { id: String(l.id) } })} />
-            <Row>
+            {!l.moderatedAt && <Row>
               {l.status === "active" ? (
                 <>
                   <Button title="تم البيع" variant="outline" style={{ flex: 1 }} onPress={() => status.run("sold")} loading={status.busy} />
@@ -109,7 +113,7 @@ export default function ListingScreen() {
               ) : (
                 <Button title="إعادة النشر" variant="outline" style={{ flex: 1 }} onPress={() => status.run("active")} loading={status.busy} />
               )}
-            </Row>
+            </Row>}
             {l.status === "active" && (
               <Button title={`★ تمييز 7 أيام (${iqd(meta?.settings.featuredListingPrice)})`} variant="earth" onPress={() => feature.run()} loading={feature.busy} />
             )}

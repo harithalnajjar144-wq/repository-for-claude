@@ -82,7 +82,9 @@ The admin account is created only if that phone number doesn't exist yet, so cha
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | For `SMS_PROVIDER=twilio`. |
 | `SMS_WEBHOOK_URL`, `SMS_WEBHOOK_TOKEN` | For `SMS_PROVIDER=webhook`: receives `{ to, phone, message }`. |
 | `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION` | Store photos in Cloudflare R2 / S3 instead of the volume. Image URLs stay the same. |
+| `S3_PRIVATE_BUCKET` | Separate, never-public bucket for ID documents and receipts. Required when `S3_PUBLIC_URL` is set. |
 | `S3_PUBLIC_URL` | Optional public bucket/CDN domain; public images then redirect there. |
+| `TRUST_PROXY_HOPS` | Number of proxies in front of the app (default `1`, right for Railway). Used to find the real client IP for rate limits. |
 | `EXPO_ACCESS_TOKEN` | Optional, if push security is enabled in your Expo account. |
 | `MIN_APP_VERSION` | Oldest mobile app version allowed (the app asks older versions to update). |
 

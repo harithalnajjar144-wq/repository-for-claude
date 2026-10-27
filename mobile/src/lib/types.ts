@@ -39,6 +39,7 @@ export type Listing = {
   images: string[];
   status: "active" | "sold" | "hidden" | "removed";
   featuredUntil: string | null;
+  moderatedAt?: string | null;
   views: number;
   createdAt: string;
   seller?: SellerBrief;

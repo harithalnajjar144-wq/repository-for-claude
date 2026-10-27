@@ -50,7 +50,11 @@ export async function saveService(user: SessionUser, input: unknown) {
   const { id, ...d } = parse(serviceInput, input);
   const values = { ...d, description: d.description || null, price: d.price ?? null };
   if (id) {
-    const [row] = await db.update(vetServices).set(values).where(and(eq(vetServices.id, id), eq(vetServices.providerId, p.id))).returning();
+    const [row] = await db
+      .update(vetServices)
+      .set(values)
+      .where(and(eq(vetServices.id, id), eq(vetServices.providerId, p.id), eq(vetServices.isActive, true)))
+      .returning();
     if (!row) throw new UserError("الخدمة غير موجودة.");
     return row;
   }
@@ -121,8 +125,9 @@ export async function updateBookingStatus(user: SessionUser, id: number, status:
       status: status as "confirmed" | "completed" | "rejected" | "cancelled",
       providerNote: isProvider ? note?.slice(0, 1000) || b.b.providerNote : b.b.providerNote,
     })
-    .where(eq(bookings.id, id))
+    .where(and(eq(bookings.id, id), eq(bookings.status, b.b.status)))
     .returning();
+  if (!row) throw new UserError("تغيرت حالة الحجز. حدّث الصفحة وحاول مرة أخرى.");
   await notify(
     isProvider ? b.b.userId : b.p.userId,
     BOOKING_LABELS[status],
@@ -141,7 +146,12 @@ export async function saveProduct(user: SessionUser, input: unknown, images: str
   if (images.length > 4) throw new UserError("الحد الأقصى 4 صور.");
   const values = { ...d, description: d.description || null, unit: d.unit || null, isActive: true, images };
   if (id) {
-    const [row] = await db.update(products).set(values).where(and(eq(products.id, id), eq(products.providerId, p.id))).returning();
+    // Deleted products stay deleted.
+    const [row] = await db
+      .update(products)
+      .set(values)
+      .where(and(eq(products.id, id), eq(products.providerId, p.id), eq(products.isActive, true)))
+      .returning();
     if (!row) throw new UserError("المنتج غير موجود.");
     return row;
   }
@@ -151,7 +161,7 @@ export async function saveProduct(user: SessionUser, input: unknown, images: str
 
 export async function getMyProduct(user: SessionUser, id: number) {
   const p = await getMyProvider(user, "shop");
-  const [row] = await db.select().from(products).where(and(eq(products.id, id), eq(products.providerId, p.id)));
+  const [row] = await db.select().from(products).where(and(eq(products.id, id), eq(products.providerId, p.id), eq(products.isActive, true)));
   if (!row) throw new UserError("المنتج غير موجود.");
   return row;
 }
@@ -224,11 +234,13 @@ export async function updateOrderStatus(user: SessionUser, id: number, status: s
       : [];
   if (!allowed.includes(status)) throw new UserError("لا يمكنك تنفيذ هذا الإجراء.");
   const updated = await db.transaction(async (tx) => {
+    // Only move an order still in the state we checked, so stock is returned exactly once.
     const [u] = await tx
       .update(orders)
       .set({ status: status as "confirmed" | "ready" | "delivered" | "cancelled" })
-      .where(eq(orders.id, id))
+      .where(and(eq(orders.id, id), eq(orders.status, row.o.status)))
       .returning();
+    if (!u) throw new UserError("تغيرت حالة الطلب. حدّث الصفحة وحاول مرة أخرى.");
     if (status === "cancelled") {
       const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
       for (const it of items)

@@ -109,6 +109,30 @@ export const sessions = pgTable(
   (t) => [index("sessions_user_idx").on(t.userId)],
 );
 
+/** Every stored image and who uploaded it (used to stop attaching someone else's file). */
+export const uploads = pgTable(
+  "uploads",
+  {
+    name: varchar("name", { length: 80 }).primaryKey(),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    isPrivate: boolean("is_private").notNull().default(false),
+    size: integer("size").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("uploads_user_idx").on(t.userId, t.createdAt)],
+);
+
+/** Security events counted across restarts (e.g. failed logins per phone number). */
+export const securityEvents = pgTable(
+  "security_events",
+  {
+    id: serial("id").primaryKey(),
+    key: varchar("key", { length: 120 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("security_events_key_idx").on(t.key, t.createdAt)],
+);
+
 /** Expo push tokens of a user's devices. */
 export const pushTokens = pgTable(
   "push_tokens",
@@ -216,6 +240,8 @@ export const listings = pgTable(
     images: jsonb("images").$type<string[]>().notNull().default([]),
     status: listingStatusEnum("status").notNull().default("active"),
     featuredUntil: timestamp("featured_until", { withTimezone: true }),
+    /** Set when an admin hid or removed the listing; the owner cannot re-publish it. */
+    moderatedAt: timestamp("moderated_at", { withTimezone: true }),
     views: integer("views").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

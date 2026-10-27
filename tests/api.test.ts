@@ -349,11 +349,12 @@ describe("wallet and plans", () => {
 });
 
 describe("rate limits", () => {
-  it("slows down repeated failed logins", async () => {
+  it("locks the account after repeated failed logins", async () => {
     await makeUser("07714141414");
     let last: Res | null = null;
     for (let i = 0; i < 11; i++) last = await call("POST", "/auth/login", { json: { phone: "07714141414", password: "nope-nope" }, ip: `10.1.0.${i}` });
-    expect(last!.status).toBe(429);
+    expect(last!.status).toBe(400);
+    expect(last!.body.error?.message).toContain("محاولات دخول كثيرة");
   });
 });
 

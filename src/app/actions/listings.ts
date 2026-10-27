@@ -20,7 +20,7 @@ export async function createListingAction(_: ActionState, fd: FormData): Promise
   let id: number;
   try {
     const user = await requireUser();
-    const images = await saveImages(fd.getAll("images"));
+    const images = await saveImages(fd.getAll("images"), 8, { userId: user.id });
     id = (await createListing(user, formObject(fd), images)).id;
   } catch (e) {
     return toActionError(e);
@@ -35,7 +35,7 @@ export async function updateListingAction(_: ActionState, fd: FormData): Promise
     const user = await requireUser();
     const l = await getOwnListing(user, id);
     const keep = fd.getAll("keepImages").map(String).filter((u) => l.images.includes(u));
-    const added = await saveImages(fd.getAll("images"), 8 - keep.length);
+    const added = await saveImages(fd.getAll("images"), 8 - keep.length, { userId: user.id });
     await updateListing(user, id, formObject(fd), [...keep, ...added]);
   } catch (e) {
     return toActionError(e);

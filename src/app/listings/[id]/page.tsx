@@ -84,9 +84,11 @@ export default async function ListingPage({
       </nav>
 
       {created && <div className="mb-4"><Notice tone="green">✅ تم نشر إعلانك بنجاح. يمكنك تمييزه ليظهر أولاً في نتائج البحث.</Notice></div>}
-      {l.status !== "active" && (
+      {l.moderatedAt && l.status !== "active" ? (
+        <div className="mb-4"><Notice tone="red">أوقفت الإدارة هذا الإعلان لمخالفته شروط النشر. تواصل مع الدعم للاستفسار.</Notice></div>
+      ) : l.status !== "active" ? (
         <div className="mb-4"><Notice tone="earth">{l.status === "sold" ? "تم بيع هذا الإعلان." : "هذا الإعلان غير ظاهر للعامة."}</Notice></div>
-      )}
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:grid-rows-[auto_1fr] lg:gap-x-8">
         <div className="lg:col-start-1 lg:row-start-1"><Gallery images={l.images} fallback={<Thumb category={l.category} />} /></div>
@@ -120,6 +122,7 @@ export default async function ListingPage({
             <div className="card space-y-3 p-5">
               <h2 className="font-semibold">إدارة الإعلان</h2>
               <Link href={`/listings/${l.id}/edit`} className="btn-outline w-full">✏️ تعديل</Link>
+              {!(l.moderatedAt && user?.role !== "admin") && (
               <form action={setListingStatusAction} className="grid grid-cols-2 gap-2">
                 <input type="hidden" name="id" value={l.id} />
                 {l.status === "active" ? (
@@ -131,6 +134,7 @@ export default async function ListingPage({
                   <button name="status" value="active" className="btn-outline col-span-2">إعادة النشر</button>
                 )}
               </form>
+              )}
               {l.status === "active" && (
                 <ActionForm action={featureListingAction}>
                   <input type="hidden" name="id" value={l.id} />

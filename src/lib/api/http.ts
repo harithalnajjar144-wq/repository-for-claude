@@ -66,8 +66,15 @@ export function bearerToken(req: Request): string | null {
   return null;
 }
 
+/**
+ * Client IP as seen by our own proxy. Clients can put anything in X-Forwarded-For, but each proxy
+ * appends the address it received the request from, so we read from the right: with TRUST_PROXY_HOPS=1
+ * (Railway's edge) the last entry is the real client.
+ */
 export function clientIp(req: Request) {
-  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "local";
+  const hops = Math.max(1, Number(process.env.TRUST_PROXY_HOPS ?? 1));
+  const list = (req.headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return list[list.length - hops] ?? list[0] ?? req.headers.get("x-real-ip") ?? "local";
 }
 
 // ---------- Rate limiting (in-memory; fine for a single instance) ----------
@@ -79,7 +86,9 @@ export function rateLimit(key: string, max: number, windowMs: number) {
   if (list.length >= max) throw new ApiError(429, "rate_limited", "محاولات كثيرة. انتظر قليلاً ثم حاول مرة أخرى.");
   list.push(now);
   hits.set(key, list);
-  if (hits.size > 50_000) hits.clear();
+  // Drop expired entries now and then (never wipe live counters).
+  if (hits.size > 20_000)
+    for (const [k, v] of hits) if (!v.length || now - v[v.length - 1] > 3600_000) hits.delete(k);
 }
 export const resetRateLimits = () => hits.clear();
 
@@ -131,9 +140,10 @@ export async function run(req: Request, params: Record<string, string>, handler:
 
 // ---------- Helpers for handlers ----------
 
+export const MAX_ID = 2_147_483_647;
 export const intParam = (v: string | undefined | null, what = "المعرّف") => {
   const n = Number(v);
-  if (!Number.isInteger(n) || n <= 0) throw new ApiError(400, "invalid", `${what} غير صحيح.`);
+  if (!Number.isInteger(n) || n <= 0 || n > MAX_ID) throw new ApiError(400, "invalid", `${what} غير صحيح.`);
   return n;
 };
 export const pageParam = (q: URLSearchParams) => Math.max(1, Math.floor(Number(q.get("page")) || 1));

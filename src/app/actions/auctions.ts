@@ -16,7 +16,7 @@ export async function createAuctionAction(_: ActionState, fd: FormData): Promise
     const user = await requireUser();
     if (user.role === "user" || user.role === "vet" || user.role === "shop")
       throw new UserError("فتح المزادات متاح لحسابات التجار والمربين فقط.");
-    const images = await saveImages(fd.getAll("images"));
+    const images = await saveImages(fd.getAll("images"), 8, { userId: user.id });
     id = (await createAuction(user, formObject(fd), images)).id;
   } catch (e) {
     return toActionError(e);

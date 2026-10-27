@@ -4,7 +4,7 @@
  */
 import { and, asc, count, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { ads, auctions, listings, plans, providers, users, type Auction } from "@/db/schema";
+import { ads, auctions, listings, plans, providers, users, type Auction, type Provider } from "@/db/schema";
 import { issueSessionToken, revokeSessionToken } from "../auth";
 import { cancelAuction, completeAuction, joinAuction, placeBid, settleDueAuctions } from "../auctions";
 import {
@@ -34,7 +34,7 @@ import * as account from "../services/account";
 import * as listingSvc from "../services/listings";
 import * as auctionSvc from "../services/auctions";
 import * as providerSvc from "../services/providers";
-import { ApiError, created, intParam, notFound, ok, pageParam, rateLimit, strArray, type AuthedCtx, type Ctx } from "./http";
+import { ApiError, MAX_ID, created, intParam, notFound, ok, pageParam, rateLimit, strArray, type AuthedCtx, type Ctx } from "./http";
 
 type Route = {
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -51,6 +51,14 @@ const priv = (method: Route["method"], path: string, handler: (ctx: AuthedCtx) =
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const publicAuction = ({ reservePrice, ...a }: Auction) => a;
+
+/** Contact numbers only for signed-in users, as on the website. */
+const publicProvider = (p: Provider, verificationStatus: string, signedIn: boolean) => ({
+  ...p,
+  verificationStatus,
+  phone: signedIn ? p.phone : null,
+  whatsapp: signedIn ? p.whatsapp : null,
+});
 
 async function session(ctx: Ctx, userId: number) {
   const b = await ctx.body();
@@ -131,8 +139,8 @@ pub("GET", "/home", async () => {
     stats,
     liveAuctions: live.map((a) => ({ ...publicAuction(a), seller: a.seller })),
     latestListings: latest,
-    vets: vets.map((r) => ({ ...r.p, verificationStatus: r.verificationStatus })),
-    shops: shops.map((r) => ({ ...r.p, verificationStatus: r.verificationStatus })),
+    vets: vets.map((r) => publicProvider(r.p, r.verificationStatus, false)),
+    shops: shops.map((r) => publicProvider(r.p, r.verificationStatus, false)),
     ad: ad ? { id: ad.id, title: ad.title, subtitle: ad.subtitle, imageUrl: ad.imageUrl, clickUrl: `/api/ads/${ad.id}/click` } : null,
   };
 });
@@ -150,7 +158,8 @@ priv("POST", "/uploads", async (ctx) => {
   }
   const file = form.get("file");
   if (!file || typeof file === "string") throw new ApiError(400, "bad_upload", "أرسل الصورة في الحقل file.");
-  const url = await storeImage(Buffer.from(await file.arrayBuffer()), { private: ctx.query.get("private") === "1" });
+  if (file.size > MAX_IMAGE_BYTES) throw new UserError("حجم الصورة يجب أن يكون أقل من 6 ميغابايت.");
+  const url = await storeImage(Buffer.from(await file.arrayBuffer()), { private: ctx.query.get("private") === "1", userId: ctx.user.id });
   return created({ url });
 });
 
@@ -178,7 +187,6 @@ pub("POST", "/auth/register", async (ctx) => {
 pub("POST", "/auth/login", async (ctx) => {
   const b = await ctx.body();
   rateLimit(`login:${ctx.ip}`, 20, 15 * 60_000);
-  rateLimit(`login:${String(b.phone ?? "")}`, 10, 15 * 60_000);
   const u = await account.authenticate(String(b.phone ?? ""), String(b.password ?? ""));
   return session(ctx, u.id);
 });
@@ -204,7 +212,7 @@ priv("PATCH", "/me", async (ctx) => (await account.updateProfile(ctx.user, await
 priv("POST", "/me/password", async (ctx) => {
   const b = await ctx.body();
   rateLimit(`pw:${ctx.user.id}`, 10, 15 * 60_000);
-  await account.changePassword(ctx.user, String(b.current ?? ""), String(b.next ?? ""));
+  await account.changePassword(ctx.user, String(b.current ?? ""), String(b.next ?? ""), ctx.token);
   return { changed: true };
 });
 priv("POST", "/me/verification", async (ctx) => {
@@ -223,7 +231,7 @@ priv("DELETE", "/me/push-tokens", async (ctx) => {
 priv("GET", "/me/notifications", async (ctx) => account.listNotifications(ctx.user.id, pageParam(ctx.query)));
 priv("POST", "/me/notifications/read", async (ctx) => {
   const b = await ctx.body();
-  const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter(Number.isInteger) : undefined;
+  const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n <= MAX_ID) : undefined;
   return { marked: await account.markNotificationsRead(ctx.user.id, ids) };
 });
 priv("GET", "/me/listings", async (ctx) => listingSvc.myListings(ctx.user.id));
@@ -285,7 +293,7 @@ pub("GET", "/listings/:id", async (ctx) => {
 
 priv("POST", "/listings", async (ctx) => {
   const b = await ctx.body();
-  const images = await listingSvc.resolveListingImages(strArray(b.images));
+  const images = await listingSvc.resolveListingImages(ctx.user.id, strArray(b.images));
   return created(await listingSvc.createListing(ctx.user, b, images));
 });
 
@@ -293,7 +301,7 @@ priv("PATCH", "/listings/:id", async (ctx) => {
   const id = intParam(ctx.params.id);
   const current = await listingSvc.getOwnListing(ctx.user, id);
   const b = await ctx.body();
-  const images = b.images === undefined ? current.images : await listingSvc.resolveListingImages(strArray(b.images), current.images);
+  const images = b.images === undefined ? current.images : await listingSvc.resolveListingImages(ctx.user.id, strArray(b.images), current.images);
   // PATCH semantics: start from the current values.
   return listingSvc.updateListing(ctx.user, id, { ...current, ...b }, images);
 });
@@ -336,7 +344,7 @@ pub("GET", "/auctions/:id/state", async (ctx) => {
 
 priv("POST", "/auctions", async (ctx) => {
   const b = await ctx.body();
-  const images = await assertUploadedImages(strArray(b.images), { max: 8 });
+  const images = await assertUploadedImages(strArray(b.images), { max: 8, userId: ctx.user.id });
   return created(await auctionSvc.createAuction(ctx.user, b, images));
 });
 
@@ -367,7 +375,7 @@ priv("POST", "/auctions/:id/cancel", async (ctx) => {
 pub("GET", "/providers", async (ctx) => {
   const kind = ctx.query.get("kind") === "shop" ? "shop" : "vet";
   const rows = await listProviders(kind, { city: ctx.query.get("city") ?? undefined, q: ctx.query.get("q") ?? undefined });
-  return rows.map((r) => ({ ...r.p, verificationStatus: r.verificationStatus }));
+  return rows.map((r) => publicProvider(r.p, r.verificationStatus, !!ctx.user));
 });
 
 pub("GET", "/providers/:id", async (ctx) => {
@@ -402,7 +410,7 @@ priv("PATCH", "/me/business", async (ctx) => {
   const current = await providerSvc.getMyProvider(ctx.user);
   const b = await ctx.body();
   let logo: string | null | undefined = undefined;
-  if (typeof b.logo === "string") [logo] = await assertUploadedImages([b.logo], { max: 1 });
+  if (typeof b.logo === "string") [logo] = await assertUploadedImages([b.logo], { max: 1, userId: ctx.user.id });
   else if (b.logo === null) logo = null;
   return providerSvc.updateProvider(ctx.user, { ...current, ...b }, logo);
 });
@@ -416,7 +424,7 @@ priv("DELETE", "/me/business/services/:id", async (ctx) => {
 });
 priv("POST", "/me/business/products", async (ctx) => {
   const b = await ctx.body();
-  const images = await assertUploadedImages(strArray(b.images), { max: 4 });
+  const images = await assertUploadedImages(strArray(b.images), { max: 4, userId: ctx.user.id });
   return created(await providerSvc.saveProduct(ctx.user, { ...b, id: undefined }, images));
 });
 priv("PATCH", "/me/business/products/:id", async (ctx) => {
@@ -426,7 +434,7 @@ priv("PATCH", "/me/business/products/:id", async (ctx) => {
   let images = current.images;
   if (b.images !== undefined) {
     const urls = strArray(b.images);
-    const added = await assertUploadedImages(urls.filter((u) => !current.images.includes(u)), { max: 4 });
+    const added = await assertUploadedImages(urls.filter((u) => !current.images.includes(u)), { max: 4, userId: ctx.user.id });
     images = urls.filter((u) => current.images.includes(u) || added.includes(u));
   }
   return providerSvc.saveProduct(ctx.user, { ...current, ...b, id }, images);
@@ -480,7 +488,11 @@ export function match(method: string, path: string) {
     pathMatched = true;
     if (r.method !== method) continue;
     const params: Record<string, string> = {};
-    r.names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1])));
+    try {
+      r.names.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1])));
+    } catch {
+      return null; // malformed %-encoding
+    }
     return { route: r, params };
   }
   return pathMatched ? "method_not_allowed" : null;

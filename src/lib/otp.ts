@@ -9,7 +9,7 @@
  *            use this to plug in any Iraqi SMS gateway with a few lines of glue.
  */
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { phoneOtps, users } from "@/db/schema";
 import { UserError } from "./errors";
@@ -109,13 +109,16 @@ export async function verifyOtp(rawPhone: string, purpose: OtpPurpose, code: str
     .orderBy(desc(phoneOtps.createdAt))
     .limit(1);
   if (!row) throw new UserError("انتهت صلاحية الرمز. اطلب رمزاً جديداً.");
-  if (row.attempts >= MAX_ATTEMPTS) throw new UserError("تجاوزت عدد المحاولات. اطلب رمزاً جديداً.");
+  // Use up one attempt atomically before checking, so parallel guesses cannot exceed the limit.
+  const claimed = await db
+    .update(phoneOtps)
+    .set({ attempts: sql`${phoneOtps.attempts} + 1` })
+    .where(and(eq(phoneOtps.id, row.id), lt(phoneOtps.attempts, MAX_ATTEMPTS)))
+    .returning({ id: phoneOtps.id });
+  if (!claimed.length) throw new UserError("تجاوزت عدد المحاولات. اطلب رمزاً جديداً.");
   const expected = Buffer.from(row.codeHash);
   const actual = Buffer.from(hashCode(phone, String(code).trim()));
-  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-    await db.update(phoneOtps).set({ attempts: row.attempts + 1 }).where(eq(phoneOtps.id, row.id));
-    throw new UserError("الرمز غير صحيح.");
-  }
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new UserError("الرمز غير صحيح.");
   const token = randomBytes(24).toString("base64url");
   await db
     .update(phoneOtps)

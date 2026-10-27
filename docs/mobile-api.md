@@ -4,7 +4,7 @@ Base URL: `https://<your-domain>/api/v1`. All bodies are JSON except `POST /uplo
 
 ## Conventions
 
-- **Auth:** `POST /auth/login` or `/auth/register` returns `{ token, expiresAt, user }`. Send `Authorization: Bearer <token>` on every request. Tokens are stored hashed in the `sessions` table (`client = 'mobile'`), last 90 days and are extended while used. Logout revokes the token. Banning a user revokes all sessions.
+- **Auth:** `POST /auth/login` or `/auth/register` returns `{ token, expiresAt, user }`. Send `Authorization: Bearer <token>` on every request. Tokens are stored hashed in the `sessions` table (`client = 'mobile'`), last 90 days and are extended while used. Logout revokes the token. Banning a user revokes all sessions and push tokens.
 - **Success:** `{ "data": ... }`, lists may add `page`, `totalPages`, `total`.
 - **Errors:** `{ "error": { "code", "message" } }` with HTTP status 400 (`invalid`, message is Arabic and can be shown as-is), 401 `unauthorized`, 403, 404 `not_found`, 405, 429 `rate_limited`, 500 `server_error`.
 - **Values:** money is whole IQD; dates are ISO 8601 UTC; enums are sent as keys — labels come from `GET /meta`.
@@ -60,4 +60,4 @@ Base URL: `https://<your-domain>/api/v1`. All bodies are JSON except `POST /uplo
 
 🔒 = needs a token. The admin panel stays web-only.
 
-Rate limits (per instance): login 10 per phone / 20 per IP per 15 min, registration 10 per IP per hour, SMS codes 10 per IP per hour, bids 30 per minute.
+Rate limits: an account is locked for 15 minutes after 10 failed logins (any phone spelling, any IP; stored in the database and shared with the website); per IP: 20 logins per 15 min, 10 registrations and 10 SMS codes per hour; SMS codes allow 5 guesses; bids 30 per minute. Changing or resetting the password signs out other devices. Uploaded files can only be attached by the user who uploaded them (300 uploads per day).

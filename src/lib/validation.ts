@@ -8,11 +8,15 @@ import { UserError } from "./errors";
 
 const keys = <T extends readonly { key: string }[]>(list: T) => list.map((x) => x.key) as [string, ...string[]];
 
-/** Optional non-negative integer; "" / null / undefined → undefined; "1,000" → 1000. */
-export const optInt = z.preprocess(
-  (v) => (v === "" || v === null || v === undefined ? undefined : Number(String(v).replace(/[,\s]/g, ""))),
-  z.number().int().min(0).optional(),
-);
+const MAX_INT = 2_147_483_647; // Postgres integer
+const MAX_MONEY = 1_000_000_000_000; // 1 trillion IQD
+const toNum = (v: unknown) => (v === "" || v === null || v === undefined ? undefined : Number(String(v).replace(/[,\s]/g, "")));
+
+/** Optional non-negative integer (fits a Postgres integer); "" / null / undefined → undefined; "1,000" → 1000. */
+export const optInt = z.preprocess(toNum, z.number().int("أدخل رقماً صحيحاً").min(0).max(MAX_INT, "الرقم كبير جداً").optional());
+/** Optional amount of money in IQD. */
+export const optMoney = z.preprocess(toNum, z.number().int("أدخل مبلغاً صحيحاً").min(0).max(MAX_MONEY, "المبلغ كبير جداً").optional());
+const id = z.preprocess((v) => Number(v), z.number().int().positive("المعرّف غير صحيح.").max(MAX_INT, "المعرّف غير صحيح."));
 /** Checkbox / JSON boolean. */
 export const bool = z.preprocess((v) => v === true || v === "on" || v === "true" || v === "1", z.boolean());
 const optText = (max: number) =>
@@ -60,7 +64,10 @@ export const verificationInput = z.object({
 });
 
 export const topupInput = z.object({
-  amount: z.preprocess((v) => Math.floor(Number(v)), z.number().min(5000, "أقل مبلغ للشحن 5,000 د.ع.").max(100_000_000, "المبلغ كبير جداً. تواصل مع الدعم.")),
+  amount: z.preprocess(
+    (v) => Math.floor(Number(v)),
+    z.number({ message: "أدخل المبلغ." }).min(5000, "أقل مبلغ للشحن 5,000 د.ع.").max(100_000_000, "المبلغ كبير جداً. تواصل مع الدعم."),
+  ),
   method: z.enum(keys(TOPUP_METHODS), { message: "اختر طريقة الدفع." }),
   transferRef: optText(120),
   receiptImage: optText(300),
@@ -74,12 +81,12 @@ export const listingInput = z.object({
   breed: optText(80),
   title: z.string().trim().min(5, "العنوان قصير جداً").max(160),
   description: z.string().trim().min(10, "أضف وصفاً أوضح (10 أحرف على الأقل)").max(5000),
-  price: optInt,
+  price: optMoney,
   negotiable: bool,
   quantity: z.preprocess((v) => Number(v || 1), z.number().int().min(1, "العدد غير صحيح").max(100000)),
-  ageMonths: optInt,
+  ageMonths: z.preprocess(toNum, z.number().int().min(0).max(600, "العمر غير صحيح").optional()),
   gender,
-  weightKg: optInt,
+  weightKg: z.preprocess(toNum, z.number().int().min(0).max(5000, "الوزن غير صحيح").optional()),
   city,
   area: optText(80),
 });
@@ -89,7 +96,7 @@ export const listingStatus = z.enum(["active", "sold", "hidden", "removed"]);
 
 export const reportInput = z.object({
   targetType: z.enum(["listing", "auction", "user", "provider"], { message: "بلاغ غير صالح." }),
-  targetId: z.preprocess((v) => Number(v), z.number().int().positive("بلاغ غير صالح.")),
+  targetId: id,
   reason: z.enum(keys(REPORT_REASONS), { message: "اختر سبب البلاغ." }),
   details: optText(2000),
 });
@@ -101,15 +108,18 @@ export const auctionInput = z.object({
   description: z.string().trim().min(10, "أضف وصفاً أوضح").max(5000),
   category: animalCategory,
   breed: optText(80),
-  ageMonths: optInt,
+  ageMonths: z.preprocess(toNum, z.number().int().min(0).max(600, "العمر غير صحيح").optional()),
   gender,
-  weightKg: optInt,
+  weightKg: z.preprocess(toNum, z.number().int().min(0).max(5000, "الوزن غير صحيح").optional()),
   quantity: z.preprocess((v) => Number(v || 1), z.number().int().min(1).max(10000)),
   city,
-  startPrice: z.preprocess((v) => Number(String(v ?? "").replace(/[,\s]/g, "")), z.number().int("سعر البداية غير صحيح").min(10000, "أقل سعر بداية 10,000 د.ع")),
-  minIncrement: optInt,
-  reservePrice: optInt,
-  depositAmount: optInt,
+  startPrice: z.preprocess(
+    (v) => Number(String(v ?? "").replace(/[,\s]/g, "")),
+    z.number().int("سعر البداية غير صحيح").min(10000, "أقل سعر بداية 10,000 د.ع").max(MAX_MONEY, "المبلغ كبير جداً"),
+  ),
+  minIncrement: optMoney,
+  reservePrice: optMoney,
+  depositAmount: optMoney,
   startMode: z.enum(["now", "scheduled"]).default("now"),
   /** Web: "YYYY-MM-DDTHH:mm" in Baghdad time. API: full ISO timestamp. */
   startsAt: optText(40),
@@ -145,7 +155,7 @@ export const serviceInput = z.object({
   id: optInt,
   name: z.string().trim().min(2, "أدخل اسم الخدمة").max(120),
   description: optText(1000),
-  price: optInt,
+  price: optMoney,
   durationMinutes: z.preprocess((v) => Number(v || 30), z.number().int().min(5).max(600)),
 });
 
@@ -154,13 +164,13 @@ export const productInput = z.object({
   name: z.string().trim().min(2, "أدخل اسم المنتج").max(160),
   category: z.enum(keys(PRODUCT_CATEGORIES)),
   description: optText(2000),
-  price: z.preprocess((v) => Number(v), z.number().int().min(0, "السعر غير صحيح")),
+  price: z.preprocess((v) => Number(v), z.number().int().min(0, "السعر غير صحيح").max(MAX_MONEY, "المبلغ كبير جداً")),
   unit: optText(30),
-  stock: z.preprocess((v) => Number(v || 0), z.number().int().min(0)),
+  stock: z.preprocess((v) => Number(v || 0), z.number().int().min(0).max(1_000_000, "الكمية كبيرة جداً")),
 });
 
 export const bookingInput = z.object({
-  providerId: z.preprocess((v) => Number(v), z.number().int().positive()),
+  providerId: id,
   serviceId: optInt,
   /** ISO timestamp (API) — or date + time in Baghdad time (web). */
   scheduledAt: optText(40),
@@ -173,9 +183,10 @@ export const bookingInput = z.object({
 });
 
 export const orderInput = z.object({
-  providerId: z.preprocess((v) => Number(v), z.number().int().positive()),
+  providerId: id,
   items: z
-    .array(z.object({ productId: z.number().int().positive(), quantity: z.number().int().min(1).max(1000) }))
+    .array(z.object({ productId: z.number().int().positive().max(MAX_INT), quantity: z.number().int().min(1).max(1000) }))
+    .max(100, "عدد المنتجات كبير جداً")
     .min(1, "اختر كمية لمنتج واحد على الأقل."),
   fulfilment: z.enum(["pickup", "delivery"]).default("pickup"),
   address: optText(300),

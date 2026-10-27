@@ -24,14 +24,18 @@ export const sellerPublicCols = {
 /** Images in `images` must already be stored (web: saved from the form; API: checked with assertUploadedImages). */
 export async function createListing(user: SessionUser, input: unknown, images: string[]) {
   const d = parse(listingInput, input);
-  await assertCanCreateListing(user.id);
   if (images.length > MAX_IMAGES) throw new UserError(`الحد الأقصى ${MAX_IMAGES} صور.`);
   if (d.type === "offer" && images.length === 0) throw new UserError("أضف صورة واحدة على الأقل للحيوان.");
-  const [row] = await db
-    .insert(listings)
-    .values({ ...d, userId: user.id, images, breed: d.breed || null, area: d.area || null })
-    .returning();
-  return row;
+  return db.transaction(async (tx) => {
+    // One create at a time per user, so parallel requests cannot pass the plan limit together.
+    await tx.execute(sql`select id from users where id = ${user.id} for update`);
+    await assertCanCreateListing(user.id, tx);
+    const [row] = await tx
+      .insert(listings)
+      .values({ ...d, userId: user.id, images, breed: d.breed || null, area: d.area || null })
+      .returning();
+    return row;
+  });
 }
 
 export async function getOwnListing(user: SessionUser, id: number) {
@@ -41,9 +45,9 @@ export async function getOwnListing(user: SessionUser, id: number) {
 }
 
 /** API helper: accept the listing's current images plus newly uploaded ones. */
-export async function resolveListingImages(urls: string[], existing: string[] = []) {
+export async function resolveListingImages(userId: number, urls: string[], existing: string[] = []) {
   const kept = urls.filter((u) => existing.includes(u));
-  const added = await assertUploadedImages(urls.filter((u) => !existing.includes(u)), { max: MAX_IMAGES });
+  const added = await assertUploadedImages(urls.filter((u) => !existing.includes(u)), { max: MAX_IMAGES, userId });
   const all = [...new Set([...kept, ...added])];
   if (all.length > MAX_IMAGES) throw new UserError(`الحد الأقصى ${MAX_IMAGES} صور.`);
   return urls.filter((u) => all.includes(u)); // keep the client's order
@@ -74,6 +78,7 @@ export async function updateListing(user: SessionUser, id: number, input: unknow
 export async function setListingStatus(user: SessionUser, id: number, status: unknown) {
   const s = parse(listingStatus, status);
   const l = await getOwnListing(user, id);
+  if (l.moderatedAt && user.role !== "admin") throw new UserError("أوقفت الإدارة هذا الإعلان. تواصل مع الدعم.");
   if (s === "active" && l.status !== "active") await assertCanCreateListing(l.userId);
   const [row] = await db.update(listings).set({ status: s, updatedAt: new Date() }).where(eq(listings.id, id)).returning();
   return row;
@@ -84,6 +89,9 @@ export async function featureListing(user: SessionUser, id: number) {
   if (l.status !== "active") throw new UserError("يمكن تمييز الإعلانات النشطة فقط.");
   const s = await getSettings();
   return db.transaction(async (tx) => {
+    // Lock the listing so two taps cannot both extend from the same date.
+    const [locked] = await tx.select().from(listings).where(eq(listings.id, id)).for("update");
+    if (locked.status !== "active") throw new UserError("يمكن تمييز الإعلانات النشطة فقط.");
     await moveFunds(tx, {
       userId: user.id,
       amount: -s.featuredListingPrice,
@@ -91,7 +99,7 @@ export async function featureListing(user: SessionUser, id: number) {
       reference: `listing:${id}`,
       note: `تمييز إعلان لمدة 7 أيام: ${l.title}`,
     });
-    const base = l.featuredUntil && l.featuredUntil > new Date() ? l.featuredUntil : new Date();
+    const base = locked.featuredUntil && locked.featuredUntil > new Date() ? locked.featuredUntil : new Date();
     const featuredUntil = new Date(base.getTime() + 7 * 86400_000);
     await tx.update(listings).set({ featuredUntil }).where(eq(listings.id, id));
     return featuredUntil;

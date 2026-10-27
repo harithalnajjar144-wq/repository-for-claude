@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { ads, listings, plans, reports, sessions, topupRequests, users, verificationRequests } from "@/db/schema";
+import { ads, listings, plans, pushTokens, reports, sessions, topupRequests, users, verificationRequests } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
 import { toActionError, UserError, type ActionState } from "@/lib/errors";
 import { iqd } from "@/lib/format";
@@ -46,7 +46,10 @@ export async function updateUserAction(fd: FormData) {
   if (id === admin.id && (op === "ban" || op === "role")) return; // don't lock yourself out
   if (op === "ban" || op === "unban") {
     await db.update(users).set({ isBanned: op === "ban" }).where(eq(users.id, id));
-    if (op === "ban") await db.delete(sessions).where(eq(sessions.userId, id));
+    if (op === "ban") {
+      await db.delete(sessions).where(eq(sessions.userId, id));
+      await db.delete(pushTokens).where(eq(pushTokens.userId, id));
+    }
   } else if (op === "role") {
     const role = String(fd.get("role")) as (typeof ROLES)[number];
     if (ROLES.includes(role)) await db.update(users).set({ role }).where(eq(users.id, id));
@@ -94,7 +97,12 @@ export async function moderateListingAction(fd: FormData) {
   const id = Number(fd.get("id"));
   const status = String(fd.get("status")) as "active" | "hidden" | "removed";
   if (!["active", "hidden", "removed"].includes(status)) return;
-  const [l] = await db.update(listings).set({ status }).where(eq(listings.id, id)).returning();
+  // moderatedAt stops the owner from re-publishing a listing the admin took down.
+  const [l] = await db
+    .update(listings)
+    .set({ status, moderatedAt: status === "active" ? null : new Date() })
+    .where(eq(listings.id, id))
+    .returning();
   if (l && status !== "active") await notify(l.userId, "تم إيقاف إعلانك", `إعلان "${l.title}" أوقف من قبل الإدارة لمخالفته شروط النشر.`, `/listings/${l.id}`);
   revalidatePath("/admin/listings");
 }
@@ -151,14 +159,14 @@ export async function savePlanAction(_: ActionState, fd: FormData): Promise<Acti
 
 export async function saveAdAction(_: ActionState, fd: FormData): Promise<ActionState> {
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
     const id = Number(fd.get("id")) || undefined;
     const title = String(fd.get("title") ?? "").trim();
     if (!title) throw new UserError("أدخل عنوان الإعلان.");
     const link = String(fd.get("linkUrl") ?? "").trim();
     if (link && !/^(https?:\/\/|\/)/.test(link)) throw new UserError("الرابط يجب أن يبدأ بـ https:// أو /");
     const img = fd.get("image");
-    const imageUrl = img && typeof img === "object" && img.size > 0 ? await saveImage(img) : undefined;
+    const imageUrl = img && typeof img === "object" && img.size > 0 ? await saveImage(img, { userId: admin.id }) : undefined;
     const endsAt = String(fd.get("endsAt") ?? "");
     const values = {
       title,

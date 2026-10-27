@@ -30,7 +30,7 @@ async function quietly(fn: () => Promise<unknown>) {
 export async function updateProviderAction(_: ActionState, fd: FormData): Promise<ActionState> {
   try {
     const user = await requireUser();
-    const logo = (await saveImage(fd.get("logo"))) ?? undefined;
+    const logo = (await saveImage(fd.get("logo"), { userId: user.id })) ?? undefined;
     const p = await updateProvider(user, formObject(fd), logo);
     revalidatePath(`/${p.kind === "vet" ? "vets" : "shops"}/${p.id}`);
     return { ok: true, message: "تم حفظ الملف التجاري." };
@@ -79,8 +79,8 @@ export async function saveProductAction(_: ActionState, fd: FormData): Promise<A
     if (id) {
       const existing = await getMyProduct(user, id);
       const keep = fd.getAll("keepImages").map(String).filter((u) => existing.images.includes(u));
-      images = [...keep, ...(await saveImages(fd.getAll("images"), 4 - keep.length))];
-    } else images = await saveImages(fd.getAll("images"), 4);
+      images = [...keep, ...(await saveImages(fd.getAll("images"), 4 - keep.length, { userId: user.id }))];
+    } else images = await saveImages(fd.getAll("images"), 4, { userId: user.id });
     const p = await saveProduct(user, formObject(fd), images);
     revalidatePath("/dashboard/business");
     revalidatePath(`/shops/${p.providerId}`);
