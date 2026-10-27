@@ -1,0 +1,80 @@
+{
+  "expo": {
+    "name": "حلالي",
+    "slug": "halali",
+    "version": "1.0.0",
+    "scheme": "halali",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "primaryColor": "#216a43",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "iq.halali.app",
+      "infoPlist": {
+        "CFBundleDevelopmentRegion": "ar",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "iq.halali.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#216a43",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-localization",
+        {
+          "supportsRTL": true,
+          "forcesRTL": true,
+          "supportedLocales": ["ar"]
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#f7f2e9"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "يحتاج حلالي إلى الوصول للصور لإضافة صور الحيوانات إلى إعلاناتك.",
+          "cameraPermission": "يحتاج حلالي إلى الكاميرا لتصوير الحيوانات والمستمسكات."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#216a43",
+          "defaultChannel": "default"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "https://halali.up.railway.app"
+    }
+  }
+}

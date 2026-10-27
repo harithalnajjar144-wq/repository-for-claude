@@ -181,6 +181,8 @@ describe("listings", () => {
     expect(cr.status).toBe(201);
     const id = data(cr).id;
 
+    for (const sort of ["price_asc", "price_desc", "popular", ""])
+      expect((await call("GET", `/listings?sort=${sort}`)).status).toBe(200);
     const search = await call("GET", "/listings?q=عواسي&city=anbar");
     expect(data(search)).toHaveLength(1);
     expect(search.body.totalPages).toBe(1);

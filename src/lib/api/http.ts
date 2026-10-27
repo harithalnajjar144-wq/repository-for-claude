@@ -33,10 +33,18 @@ export type AuthedCtx = Ctx & { user: SessionUser };
 
 export type Handler = (ctx: Ctx) => Promise<unknown>;
 
+/** The API uses Bearer tokens (not cookies), so any origin may call it — e.g. the app's web preview. */
+export const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
+  "Access-Control-Max-Age": "86400",
+};
+
 export const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...CORS_HEADERS, ...headers },
   });
 
 /** A handler's return value: data (wrapped as { data }) or a ready Response. */
@@ -50,12 +58,12 @@ export class Ok {
 export const ok = (data: unknown, extra: Record<string, unknown> = {}) => new Ok(data, extra);
 export const created = (data: unknown, extra: Record<string, unknown> = {}) => new Ok(data, extra, 201);
 
+/** Only `Authorization: Bearer` is accepted. Cookies are ignored on purpose: the API allows any
+ * origin (CORS "*"), so accepting the website's cookie would let other sites act as a signed-in user. */
 export function bearerToken(req: Request): string | null {
   const auth = req.headers.get("authorization");
   if (auth?.startsWith("Bearer ")) return auth.slice(7).trim() || null;
-  // The website's cookie also works, so the API can be explored from a signed-in browser.
-  const m = /(?:^|;\s*)halali_session=([^;]+)/.exec(req.headers.get("cookie") ?? "");
-  return m ? decodeURIComponent(m[1]) : null;
+  return null;
 }
 
 export function clientIp(req: Request) {

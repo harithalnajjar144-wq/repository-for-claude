@@ -39,9 +39,9 @@ export async function searchListings(f: ListingFilters) {
   const featuredFirst = sql`(case when ${listings.featuredUntil} > now() then 0 else 1 end)`;
   const order =
     f.sort === "price_asc"
-      ? [asc(sql`${listings.price} nulls last`)]
+      ? [sql`${listings.price} asc nulls last`]
       : f.sort === "price_desc"
-        ? [desc(sql`${listings.price} nulls last`)]
+        ? [sql`${listings.price} desc nulls last`]
         : f.sort === "popular"
           ? [desc(listings.views)]
           : [featuredFirst, desc(listings.createdAt)];
